@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T.C. Sağlık Bakanlığı - SDS Değerlendirme Dashboard</title>
+    <meta name="description" content="Sağlık Tesisi Değerlendirme Sistemi - Gözlem ve Komite Raporları Analiz Paneli">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <script src="/static/js/chart.umd.min.js"></script>
+
+    <!-- Highcharts (Local) -->
+    <script src="/static/js/highmaps.js"></script>
+    <script src="/static/js/exporting.js"></script>
+
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+
+<body>
+    <!-- LOGIN OVERLAY -->
+    <div id="login-overlay" class="login-overlay show" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at center, rgba(15, 40, 71, 0.98), rgba(10, 22, 40, 1)); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(12px);">
+        <div class="login-card" style="background: rgba(255, 255, 255, 0.95); width: 100%; max-width: 420px; padding: 40px; border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; border: 1px solid rgba(255, 255, 255, 0.3);">
+            <div class="login-logo" style="width: 90px; height: 90px; margin: 0 auto 24px; background: white; padding: 15px; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">
+                <img src="/static/img/bakanlik_logo.png" alt="Logo" style="width: 100%; height: 100%; object-fit: contain;">
+            </div>
+            <h2 style="color: #0054A6; font-size: 24px; font-weight: 800; margin-bottom: 30px; letter-spacing: -0.5px; font-family: 'Inter', sans-serif;">Sistem Girişi</h2>
+            <div class="login-form">
+                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #64748B; margin-bottom: 8px; margin-left: 4px; font-family: 'Inter', sans-serif;">E-Posta / Kullanıcı Adı</label>
+                    <input type="text" id="login-username" placeholder="kullanici@saglik.gov.tr" style="width: 100%; padding: 14px 18px; border: 2px solid #E2E8F0; border-radius: 12px; font-family: inherit; font-size: 14px;">
+                </div>
+                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: #64748B; margin-bottom: 8px; margin-left: 4px; font-family: 'Inter', sans-serif;">Şifre</label>
+                    <input type="password" id="login-password" placeholder="••••••••" style="width: 100%; padding: 14px 18px; border: 2px solid #E2E8F0; border-radius: 12px; font-family: inherit; font-size: 14px;">
+                </div>
+                <button class="btn btn-primary btn-block" onclick="handleLogin()" style="width: 100%; justify-content: center; padding: 14px; font-size: 15px; font-weight: 700; margin-top: 10px; background: #0054A6; color: white; border: none; border-radius: 8px; cursor: pointer;">Giriş Yap</button>
+                <div id="login-error" class="login-error" style="margin-top: 20px; color: #EF4444; font-size: 13px; font-weight: 600; min-height: 20px; font-family: 'Inter', sans-serif;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOP HEADER BAR -->
+    <header id="main-header" style="display: none;">
+        <div class="header-left">
+            <div class="logo-container">
+                <div class="logo-emblem">
+                    <img src="/static/img/bakanlik_logo.png" alt="Logo" class="spinning-logo">
+                </div>
+                <div class="logo-text">
+                    <span class="logo-title">T.C. SAĞLIK BAKANLIĞI</span>
+                    <span class="logo-subtitle">SAĞLIK TESİSLERİ DEĞERLENDİRME DAİRESİ RAPORLAMA EKRANI</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-center">
+            <!-- Removed page title --><!-- Removed page title -->
+        </div>
+        <div class="header-right">
+            <div class="header-clock" id="header-clock"></div>
+            <!-- Removed header-badge -->
+        </div>
+    </header>
+
+    <div id="app-container" style="display: none;">
+        <!-- LEFT SIDEBAR -->
+        <aside id="sidebar">
+            <nav class="sidebar-nav">
+                <!-- ANA PANEL -->
+                <div class="nav-section">
+                    <div class="nav-item active" data-page="dashboard" id="nav-dashboard">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>Ana Panel</span>
+                    </div>
+                </div>
+
+                <!-- GÖZLEM RAPORLARI -->
+                <div class="nav-section">
+                    <div class="nav-section-title" data-toggle="gozlem-menu">
+                        <i class="fas fa-eye"></i>
+                        <span>GÖZLEM RAPORLARI</span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="nav-submenu" id="gozlem-menu">
+                        <div class="nav-item" data-page="gozlem-rapor" id="nav-gozlem-rapor">
+                            <i class="fas fa-table"></i>
+                            <span>Gözlem Rapor Analizi</span>
+                        </div>
+                        <div class="nav-item" data-page="gozlem-filtre" id="nav-gozlem-filtre">
+                            <i class="fas fa-filter"></i>
+                            <span>Gözlem Filtreleme</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KOMİTE-KOMİSYON RAPORLARI -->
+                <div class="nav-section">
+                    <div class="nav-section-title" data-toggle="komite-menu">
+                        <i class="fas fa-users-rectangle"></i>
+                        <span>KOMİTE-KOMİSYON RAPORLARI</span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="nav-submenu" id="komite-menu">
+                        <div class="nav-item" data-page="komite-rapor" id="nav-komite-rapor">
+                            <i class="fas fa-file-medical"></i>
+                            <span>Komisyon Raporları</span>
+                        </div>
+                        <div class="nav-item" data-page="komite-detay" id="nav-komite-detay">
+                            <i class="fas fa-clipboard-check"></i>
+                            <span>Standart Değerlendirme</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HİYERARŞİK AĞAÇ -->
+                <div class="nav-section">
+                    <div class="nav-section-title" data-toggle="tree-menu">
+                        <i class="fas fa-sitemap"></i>
+                        <span>HİYERARŞİK YAPI</span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="nav-submenu" id="tree-menu">
+                        <div id="hierarchy-tree" class="hierarchy-tree">
+                            <!-- Dinamik olarak doldurulacak -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GELİŞİM PLANLARI -->
+                <div class="nav-section">
+                    <div class="nav-section-title" data-toggle="menu-gelisim">
+                        <i class="fas fa-chart-line"></i>
+                        <span>GELİŞİM PLANLARI</span>
+                        <i class="fas fa-chevron-right toggle-icon"></i>
+                    </div>
+                    <div id="menu-gelisim" class="nav-submenu">
+                        <div class="nav-item" id="nav-gelisim-rapor" data-page="gelisim-rapor">
+                            <i class="fas fa-file-alt"></i>
+                            <span>Plan Analizi</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-divider"></div>
+                <!-- SİSTEM YÖNETİMİ (Admin Only) -->
+                <div class="nav-section" id="nav-admin-section" style="display: none;">
+                    <div class="nav-section-title" data-toggle="admin-menu">
+                        <i class="fas fa-user-shield"></i>
+                        <span>SİSTEM YÖNETİMİ</span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="nav-submenu" id="admin-menu">
+                        <div class="nav-item" data-page="admin-users" id="nav-admin-users">
+                            <i class="fas fa-users-cog"></i>
+                            <span>Kullanıcı Tanımlama</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ÇIKIŞ YAP -->
+                <div class="nav-section" style="margin-top: auto; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+                    <div class="nav-item" onclick="handleLogout()" style="color: #fda4af;">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Güvenli Çıkış</span>
+                    </div>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main id="main-content">
+
+            <!-- ========== DASHBOARD PAGE ========== -->
+            <div class="page active" id="page-dashboard">
+                <!-- Stats cards -->
+                <div class="stats-grid">
+                    <div class="stat-card stat-primary">
+                        <div class="stat-icon"><i class="fas fa-hospital"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-hastane">0</span>
+                            <span class="stat-label">Toplam Hastane</span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-success">
+                        <div class="stat-icon"><i class="fas fa-eye"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-gozlem">0</span>
+                            <span class="stat-label">Gözlem Kaydı</span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-warning">
+                        <div class="stat-icon"><i class="fas fa-file-medical"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-komite">0</span>
+                            <span class="stat-label">Komite Raporu</span>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-info">
+                        <div class="stat-icon"><i class="fas fa-city"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-il">0</span>
+                            <span class="stat-label">İl Sayısı</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-bar"></i> Derece Dağılımı</h3>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="chart-derece"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-doughnut"></i> Uygunluk Durumu</h3>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="chart-uygunluk"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-pie"></i> Son Durum Dağılımı</h3>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="chart-sondurum"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-city"></i> İl Bazlı Rapor Dağılımı</h3>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="chart-il"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== GÖZLEM RAPOR PAGE ========== -->
+            <div class="page" id="page-gozlem-rapor">
+                <div class="page-header">
+                    <h2><i class="fas fa-eye"></i> Gözlem Rapor Analizi</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-outline" id="btn-gozlem-grafik" onclick="showGozlemChart()">
+                            <i class="fas fa-chart-bar"></i> Grafiksel Analizleri Gör
+                        </button>
+                    </div>
+                </div>
+                <div class="data-table-container">
+                    <div class="table-responsive">
+                        <table class="data-table" id="gozlem-table">
+                            <thead>
+                                <tr>
+                                    <th>İl</th>
+                                    <th>İlçe</th>
+                                    <th class="col-hastane">Tesis Adı</th>
+                                    <th>Bölüm</th>
+                                    <th>Soru No</th>
+                                    <th class="col-soru">Soru</th>
+                                    <th class="col-derece">Verilen Derece</th>
+                                    <th>Notlar</th>
+                                    <th class="col-gorsel">Görseller</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gozlem-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="gozlem-pagination"></div>
+                </div>
+            </div>
+
+            <!-- ========== GÖZLEM FİLTRE PAGE ========== -->
+            <div class="page" id="page-gozlem-filtre">
+                <div class="page-header">
+                    <h2><i class="fas fa-filter"></i> Gözlem Filtreleme</h2>
+                </div>
+                <div class="filter-panel">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label><i class="fas fa-map-marker-alt"></i> İl</label>
+                            <select id="filter-gozlem-il" onchange="onGozlemIlChange()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label><i class="fas fa-map-pin"></i> İlçe</label>
+                            <select id="filter-gozlem-ilce" onchange="onGozlemIlceChange()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label><i class="fas fa-hospital"></i> Hastane</label>
+                            <select id="filter-gozlem-hastane" onchange="loadGozlemFiltered()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label><i class="fas fa-star"></i> Derece</label>
+                            <select id="filter-gozlem-derece" onchange="loadGozlemFiltered()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label><i class="fas fa-clinic-medical"></i> Servis</label>
+                            <select id="filter-gozlem-servis" onchange="loadGozlemFiltered()">
+                                <option value="">Tümü</option>
+                                <option value="Acil Servis Hizmetleri">Acil Servis</option>
+                                <option value="Poliklinik Hizmetleri">Poliklinik</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label><i class="fas fa-search"></i> Arama</label>
+                            <input type="text" id="filter-gozlem-search" placeholder="Anahtar kelime..."
+                                onkeyup="debounceGozlemSearch()">
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="btn btn-primary" onclick="loadGozlemFiltered()">
+                            <i class="fas fa-search"></i> Filtrele
+                        </button>
+                        <button class="btn btn-outline" onclick="clearGozlemFilters()">
+                            <i class="fas fa-times"></i> Temizle
+                        </button>
+                    </div>
+                </div>
+                <div class="data-table-container">
+                    <div class="filter-info" id="filter-gozlem-info"></div>
+                    <div class="table-responsive">
+                        <table class="data-table" id="gozlem-filter-table">
+                            <thead>
+                                <tr>
+                                    <th>İl</th>
+                                    <th>İlçe</th>
+                                    <th class="col-hastane">Tesis Adı</th>
+                                    <th>Bölüm</th>
+                                    <th>Soru No</th>
+                                    <th class="col-soru">Soru</th>
+                                    <th class="col-derece">Verilen Derece</th>
+                                    <th>Notlar</th>
+                                    <th class="col-gorsel">Görseller</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gozlem-filter-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="gozlem-filter-pagination"></div>
+                </div>
+            </div>
+
+            <!-- ========== KOMİTE RAPOR PAGE ========== -->
+            <div class="page" id="page-komite-rapor">
+                <div class="page-header">
+                    <h2><i class="fas fa-users-rectangle"></i> Komite/Komisyon Raporları</h2>
+                    <div class="page-actions">
+                        <button class="btn btn-outline" onclick="showKomiteChart()">
+                            <i class="fas fa-chart-bar"></i> Grafiksel Analizleri Gör
+                        </button>
+                    </div>
+                </div>
+                <!-- Komite Filtreler -->
+                <div class="filter-panel compact">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>İl</label>
+                            <select id="filter-komite-il" onchange="onKomiteIlChange()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>İlçe</label>
+                            <select id="filter-komite-ilce" onchange="onKomiteIlceChange()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Hastane</label>
+                            <select id="filter-komite-hastane" onchange="loadKomiteFiltered()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Rapor Tipi</label>
+                            <select id="filter-komite-tip" onchange="loadKomiteFiltered()">
+                                <option value="">Tümü</option>
+                                <option value="Komite">Komite</option>
+                                <option value="Komisyon">Komisyon</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <button class="btn btn-primary btn-sm" onclick="loadKomiteFiltered()">
+                                <i class="fas fa-search"></i> Filtrele
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="data-table-container">
+                    <div class="table-responsive">
+                        <table class="data-table" id="komite-table">
+                            <thead>
+                                <tr>
+                                    <th>İl</th>
+                                    <th>İlçe</th>
+                                    <th class="col-hastane">Tesis Adı</th>
+                                    <th>Rapor Tipi</th>
+                                    <th>Değerlendirme Tarihi</th>
+                                    <th>Saat</th>
+                                    <th>Üyeler</th>
+                                    <th>Detay</th>
+                                </tr>
+                            </thead>
+                            <tbody id="komite-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="komite-pagination"></div>
+                </div>
+            </div>
+
+            <!-- ========== KOMİTE DETAY PAGE ========== -->
+            <div class="page" id="page-komite-detay">
+                <div class="page-header">
+                    <h2><i class="fas fa-clipboard-check"></i> Standart Değerlendirme Detayı</h2>
+                </div>
+                <div id="komite-detail-content">
+                    <div class="empty-state">
+                        <i class="fas fa-hand-pointer"></i>
+                        <p>Lütfen bir komite raporu seçin</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: GELİŞİM PLANLARI -->
+            <div id="page-gelisim-rapor" class="page">
+                <div class="page-header">
+                    <h2><i class="fas fa-chart-line"></i> Gelişim Planları Analizi</h2>
+                    <div class="page-actions">
+                        <span class="badge badge-info" id="gelisim-count-badge">0 Kayıt</span>
+                    </div>
+                </div>
+
+                <!-- Interaktif Harita Paneli -->
+                <div class="map-section">
+                    <div class="chart-card map-card">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-map-marked-alt"></i> Türkiye Gelişim Planı Haritası (İl Bazlı)</h3>
+                            <button class="btn btn-sm btn-outline" onclick="resetGelisimMap()">
+                                <i class="fas fa-undo"></i> Sıfırla
+                            </button>
+                        </div>
+                        <div class="chart-body">
+                            <div id="gelisim-map-container" style="height: 400px; width: 100%;">
+                                <div class="map-loading">Harita yükleniyor...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-panel">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>İl</label>
+                            <select id="filter-gelisim-il" onchange="onGelisimIlChange()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Tesis Adı</label>
+                            <select id="filter-gelisim-hastane" onchange="loadGelisimData(1)">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="filter-group" style="flex: 2;">
+                            <label>Arama (Hedef, Durum vb.)</label>
+                            <div class="search-box">
+                                <i class="fas fa-search"></i>
+                                <input type="text" id="filter-gelisim-search" placeholder="Metin ara..."
+                                    oninput="debounceGelisimSearch()">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <span id="filter-gelisim-info" class="filter-info"></span>
+                        <button class="btn btn-outline" onclick="clearGelisimFilters()">
+                            <i class="fas fa-eraser"></i> Temizle
+                        </button>
+                        <button class="btn btn-primary" onclick="loadGelisimData(1)">
+                            <i class="fas fa-sync-alt"></i> Sorgula
+                        </button>
+                    </div>
+                </div>
+
+                <div class="data-table-container">
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 80px;">İl</th>
+                                    <th style="width: 250px;">Tesis Adı</th>
+                                    <th>Kurum Hedefleri</th>
+                                    <th style="width: 100px;">Süreler</th>
+                                    <th>Mevcut Durum</th>
+                                    <th>Çözüm Seçenekleri</th>
+                                    <th>İşbirliği / Takvim</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gelisim-tbody">
+                                <!-- Data will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="gelisim-pagination" class="pagination"></div>
+            </div>
+
+            <!-- ========== ADMIN: KULLANICI YÖNETİMİ ========== -->
+            <div class="page" id="page-admin-users">
+                <div class="page-header">
+                    <h2><i class="fas fa-users-cog"></i> Kullanıcı Yönetimi</h2>
+                    <button class="btn btn-primary" onclick="openAddUserModal()">
+                        <i class="fas fa-user-plus"></i> Yeni Kullanıcı Ekle
+                    </button>
+                </div>
+                
+                <div class="data-table-container">
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Kullanıcı Adı</th>
+                                    <th>Yetki</th>
+                                    <th>Kayıt Tarihi</th>
+                                    <th style="width: 100px;">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ========== MODAL: NOT DETAYI ========== -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="modal-title">Not Detayı</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL: ÜYE LİSTESİ ========== -->
+    <div class="modal-overlay" id="uye-modal-overlay" onclick="closeUyeModal()">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3><i class="fas fa-users"></i> Ekip Üyeleri</h3>
+                <button class="modal-close" onclick="closeUyeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="uye-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL: GRAFİK ========== -->
+    <div class="modal-overlay" id="chart-modal-overlay" onclick="closeChartModal()">
+        <div class="modal modal-xl" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="chart-modal-title"><i class="fas fa-chart-bar"></i> Grafiksel Analiz</h3>
+                <button class="modal-close" onclick="closeChartModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <canvas id="chart-modal-canvas" style="max-height:500px;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL: GÖRSELLER CAROUSEL (Anti-Gravity) ========== -->
+    <div class="modal-overlay anti-gravity-overlay" id="gorsel-modal-overlay" onclick="closeGorselModal()">
+        <div class="modal modal-xl anti-gravity-modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="gorsel-modal-title"><i class="fas fa-images"></i> Saha Görselleri</h3>
+                <button class="modal-close" onclick="closeGorselModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="position:relative; text-align:center;">
+                <!-- Carousel Container -->
+                <div id="gorsel-carousel-container"
+                    style="display:flex; align-items:center; justify-content:center; gap:20px;">
+                    <button class="btn-glass" onclick="prevGorsel()" id="gorsel-prev-btn"><i
+                            class="fas fa-chevron-left"></i></button>
+
+                    <div style="flex-grow:1; text-align:center;">
+                        <img id="gorsel-current-img" src=""
+                            style="max-width:100%; max-height:55vh; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.15); display:none; border: 1px solid rgba(255,255,255,0.4);" />
+                        <h4 id="gorsel-current-hastane"
+                            style="margin-top:20px; color:var(--text-primary); font-weight:700; font-size: 1.1rem; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">
+                        </h4>
+                        <p id="gorsel-counter"
+                            style="color:var(--text-light); font-size:14px; margin-top:5px; font-weight:500;"></p>
+                    </div>
+
+                    <button class="btn-glass" onclick="nextGorsel()" id="gorsel-next-btn"><i
+                            class="fas fa-chevron-right"></i></button>
+                </div>
+
+                <!-- Gorsel Controls (Yönetim) -->
+                <div id="gorsel-admin-controls" class="gorsel-controls" style="display:none;">
+                    <label for="gorsel-upload-input" class="btn-glass btn-glass-primary">
+                        <i class="fas fa-plus"></i> Yeni Görsel Ekle
+                    </label>
+                    <input type="file" id="gorsel-upload-input" class="upload-input"
+                        accept="image/png, image/jpeg, image/jpg" onchange="uploadGorsel(event)" />
+
+                    <button class="btn-glass btn-glass-danger" onclick="deleteCurrentGorsel()">
+                        <i class="fas fa-trash-alt"></i> Görseli Sil
+                    </button>
+                </div>
+
+                <div id="gorsel-empty-state" class="empty-state" style="display:none; padding: 40px;">
+                    <i class="fas fa-image" style="font-size: 48px; opacity: 0.2; margin-bottom: 15px;"></i>
+                    <p style="font-weight: 500; font-size: 16px;">Bu tesise ait saha görseli bulunamadı.</p>
+
+                    <div class="gorsel-controls" style="margin-top: 20px;">
+                        <label for="gorsel-upload-empty-input" class="btn-glass btn-glass-primary">
+                            <i class="fas fa-upload"></i> İlk Görseli Yükle
+                        </label>
+                        <input type="file" id="gorsel-upload-empty-input" class="upload-input" accept="image/png"
+                            onchange="uploadGorsel(event)" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- ========== MODAL: KAYNAK DOSYA ÖNİZLEME ========== -->
+    <div class="modal-overlay" id="file-preview-modal-overlay" onclick="closeFilePreviewModal(event)">
+        <div class="modal modal-xl" id="file-preview-modal"
+            style="width: 80%; max-width: 1000px; height: 80vh; display: flex; flex-direction: column;"
+            onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="file-preview-title"><i class="fas fa-file-alt"></i> Dosya Önizleme</h3>
+                <button class="modal-close" onclick="closeFilePreviewModal(true)">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="flex: 1; padding: 0; position: relative; overflow: hidden;"
+                id="file-preview-body">
+                <div id="file-preview-loading"
+                    style="display: none; position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); text-align: center;">
+                    <i class="fas fa-spinner fa-spin fa-3x" style="color: var(--primary)"></i>
+                    <p style="margin-top: 10px; color: var(--text-secondary); font-weight: 500;">Dosya hazırlanıyor...
+                    </p>
+                </div>
+                <iframe id="file-preview-iframe" src=""
+                    style="width: 100%; height: 100%; border: none; display: none;"></iframe>
+                <div id="file-preview-content"
+                    style="width: 100%; height: 100%; overflow: auto; padding: 20px; box-sizing: border-box; display: none; background: white;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL: KULLANICI EKLE ========== -->
+    <div class="modal-overlay" id="user-modal-overlay" onclick="closeUserModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Yeni Kullanıcı Tanımla</h3>
+                <button class="modal-close" onclick="closeUserModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group mb-3">
+                    <label class="form-label">E-Posta / Kullanıcı Adı</label>
+                    <input type="text" id="new-user-username" class="form-control" placeholder="Örn: personel@saglik.gov.tr" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+                <div class="form-group mb-3">
+                    <label class="form-label">Şifre</label>
+                    <input type="password" id="new-user-password" class="form-control" placeholder="••••••••" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+                <div class="form-group mb-4">
+                    <label class="form-label">Kullanıcı Yetkisi</label>
+                    <select id="new-user-role" class="form-control" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        <option value="user">Normal Kullanıcı</option>
+                        <option value="admin">Sistem Admini</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary btn-block" style="width: 100%; padding: 12px; font-weight: 600;" onclick="saveNewUser()">Kaydı Tamamla</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,6 @@
+gozlem_formlari: 2640
+komite_raporlari: 485
+standart_degerlendirmeler: 5320
+komisyon_kararlari: 12
+gelisim_planlari: 10212
+gozlem_gorselleri: 27

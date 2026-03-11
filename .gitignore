@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+.env
+.flaskenv
+*.db
+*.sqlite
+.vscode/
+.idea/
+.DS_Store
+node_modules/
+dist/
+build/
+
+# Massive Report Directories (Excluded for Cloud Deployment)
+RAPORLAR/KOMİTE KOMİSYON RAPORLARI/
+RAPORLAR/REFERANS/
+RAPORLAR/Gelişim_Planı_İller/
+**/Thumbs.db
+**/.DS_Store
