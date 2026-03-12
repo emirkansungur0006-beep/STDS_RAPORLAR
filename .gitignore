@@ -25,3 +25,5 @@ RAPORLAR/REFERANS/
 RAPORLAR/Gelişim_Planı_İller/
 **/Thumbs.db
 **/.DS_Store
+
+.vercel

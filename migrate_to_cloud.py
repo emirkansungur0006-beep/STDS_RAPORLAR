@@ -5,16 +5,16 @@ import os
 from config import SQLITE_DB_PATH
 
 def migrate():
-    source_db = SQLITE_DB_PATH
+    from config import DB_CONFIG
     target_url = os.environ.get('DATABASE_URL')
     
     if not target_url:
         print("HATA: DATABASE_URL çevre değişkeni bulunamadı!")
         return
 
-    print(f"Taşıma işlemi başlıyor: {source_db} -> Cloud")
+    print(f"Taşıma işlemi başlıyor: Local PostgreSQL -> Cloud")
     
-    src_conn = sqlite3.connect(source_db)
+    src_conn = psycopg2.connect(**DB_CONFIG)
     src_cur = src_conn.cursor()
     
     tgt_conn = psycopg2.connect(target_url)
@@ -45,8 +45,8 @@ def migrate():
             continue
 
         # Sütun isimlerini al
-        src_cur.execute(f"PRAGMA table_info({table})")
-        cols = [col[1] for col in src_cur.fetchall()]
+        src_cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position")
+        cols = [col[0] for col in src_cur.fetchall()]
         col_str = ", ".join(cols)
         placeholders = ", ".join(["%s"] * len(cols))
         
