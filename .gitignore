@@ -27,3 +27,10 @@ RAPORLAR/Gelişim_Planı_İller/
 **/.DS_Store
 
 .vercel
+upload_log*.txt
+/tmp/
+check_local_counts.py
+check_supabase_counts.py
+deep_check_supabase.py
+migrate_sqlite_to_supabase_fast.py
+/brain/

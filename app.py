@@ -225,8 +225,8 @@ def dashboard_stats():
 
     stats = {}
 
-    # Toplam hastane sayısı
-    cur.execute("SELECT COUNT(*) FROM referans_hastaneler")
+    # Toplam hastane sayısı (Gözlem yapılan hastanelerden al)
+    cur.execute("SELECT COUNT(DISTINCT hastane_adi) FROM gozlem_formlari")
     stats['toplam_hastane'] = cur.fetchone()[0]
 
     # Gözlem form sayısı
@@ -381,12 +381,16 @@ def turkish_upper(s):
     return str(s).replace('i', 'İ').replace('ı', 'I').upper()
 
 def normalize_name(name):
-    """Kusursuz Normalizasyon: Türkçe karakterleri ASCII karşılıklarına indirger (Görsel eşleşmesi için)"""
+    """Sadece karşılaştırma için: harf büyütür, boşluk temizler, noktaları siler (ASCII only)"""
     if not name: return ""
-    import unicodedata
-    """Sadece karşılaştırma için: harf büyütür, boşluk temizler (Türkçe karakter uyumlu)"""
-    if not name: return ""
-    return " ".join(turkish_upper(str(name).strip()).split())
+    # Türkçe karakterleri ASCII'ye çevir
+    trans = str.maketrans("çğışüöÇĞİŞÜÖıİ", "cgisuoCGISUOiI")
+    name = str(name).translate(trans)
+    # ASCII olmayanları sil
+    name = "".join(c for c in name if ord(c) < 128)
+    # Noktaları sil ve büyük harf yap
+    name = name.replace(".", "").upper().strip()
+    return " ".join(name.split())
 
 def map_normalize(name):
     """Harita için sadece Türkçe BÜYÜK harf yapar (İşaretleri silmez)"""
@@ -394,10 +398,11 @@ def map_normalize(name):
     return " ".join(turkish_upper(str(name).strip()).split())
 
 def normalize_storage_path(path):
-    """Bulut depolama için yolu normalize et (ASCII only)"""
+    """Supabase Storage için yolu normalleştirir (ASCII temizliği ve casing koruması)"""
     if not path: return ""
-    trans = str.maketrans("çğışüöÇĞİŞÜÖı", "cgisuoCGISUOi")
+    trans = str.maketrans("çğışüöÇĞİŞÜÖıİ", "cgisuoCGISUOiI")
     path = str(path).translate(trans)
+    # ASCII olmayanları temizle ama yolu (folder/file) koru
     path = "".join(c for c in path if ord(c) < 128)
     return path.replace("\\", "/")
 
@@ -413,35 +418,28 @@ def get_gorseli_olan_hastaneler():
     conn.close()
     return jsonify(hastaneler)
 
-@app.route('/api/gorseller/hastane/<hastane_adi>')
+@app.route('/api/gorseller/hastane/<path:hastane_adi>')
 def get_hastane_gorselleri(hastane_adi):
-    """Belirli bir hastaneye ait görselleri döner (Normalleştirilmiş eşleşme ile)"""
-    norm_target = normalize_name(hastane_adi)
-    print(f"DEBUG: Searching for images for hospital: {hastane_adi} (Normalized: {norm_target})")
+    """Belirli bir hastaneye ait görselleri döner (Veritabanı bazlı eşleşme ile)"""
+    print(f"DEBUG: Searching for images for hospital: {hastane_adi}")
     conn = get_db()
+    cur = conn.cursor()
     
-    # SQLite vs PostgreSQL cursor farkı
-    from config import USE_SQLITE
-    if USE_SQLITE:
-        cur = conn.cursor()
-        cur.execute("SELECT hastane_adi, dosya_yolu FROM gozlem_gorselleri")
-        all_rows = [dict(r) for r in cur.fetchall()]
-    else:
-        # PostgreSQL kısmı (psycopg2 yüklü olmalı)
-        try:
-            import psycopg2.extras
-            cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        except ImportError:
-            cur = conn.cursor()
-        
-        cur.execute("SELECT hastane_adi, dosya_yolu FROM gozlem_gorselleri")
-        fetch = cur.fetchall()
-        if hasattr(fetch[0] if fetch else None, 'keys'):
-            all_rows = [dict(r) for r in fetch]
-        else:
-            columns = [desc[0] for desc in cur.description]
-            all_rows = [serialize_row(r, columns) for r in fetch]
+    # Tüm gorselleri al ve Python tarafında normalleştirilmiş karşılaştırma yap
+    # (En güvenli yol çünkü DB'deki isimler farklı normalizasyonlarda olabilir)
+    cur.execute("SELECT id, il, hastane_adi, dosya_yolu FROM gozlem_gorselleri")
+    rows = cur.fetchall()
     
+    # Column names for response
+    columns = [desc[0] for desc in cur.description]
+    all_rows = []
+    for r in rows:
+        row_dict = {}
+        for i, col in enumerate(columns):
+            row_dict[col] = r[i]
+        all_rows.append(row_dict)
+    
+    norm_target = normalize_name(hastane_adi)
     matches = []
     for r in all_rows:
         if normalize_name(r['hastane_adi']) == norm_target:
@@ -532,10 +530,10 @@ def serve_gorsel(filename):
     from config import SUPABASE_URL, BUCKET_GORSELLER
     import urllib.parse
     norm_filename = normalize_storage_path(filename)
-    # URL'deki boşluk ve özel karakterleri encode et
-    encoded_filename = urllib.parse.quote(norm_filename)
-    # Supabase public URL yapısı
+    # URL'deki boşluk ve özel karakterleri encode et, klasör slaşlarını koru
+    encoded_filename = urllib.parse.quote(norm_filename, safe='/')
     supabase_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_GORSELLER}/{encoded_filename}"
+    print(f"DEBUG: Redirecting to {supabase_url}")
     return redirect(supabase_url)
 
 
@@ -825,10 +823,11 @@ def komite_preview(id):
     import io
     import urllib.parse
 
-    # Supabase Storage'dan dosyayı indir (Normalize ve URL Encode ederek)
+    # Supabase Storage'dan dosyayı indir (Özel bucket için Authenticated URL)
     norm_dosya_adi = normalize_storage_path(dosya_adi)
-    encoded_dosya_adi = urllib.parse.quote(norm_dosya_adi)
+    encoded_dosya_adi = urllib.parse.quote(norm_dosya_adi, safe='/')
     supabase_url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_RAPORLAR}/{encoded_dosya_adi}"
+    print(f"DEBUG: Previewing file from {supabase_url}")
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "apikey": SUPABASE_KEY

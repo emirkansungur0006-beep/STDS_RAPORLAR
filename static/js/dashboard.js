@@ -339,8 +339,10 @@ function renderDereceChart(data) {
     if (!ctx) return;
 
     const colorMap = {
-        'Çok İyi': '#10B981', 'İyi': '#22C55E', 'Orta': '#EAB308',
-        'Zayıf': '#F97316', 'Kötü': '#F97316', 'Çok Zayıf': '#EF4444', 'Çok Kötü': '#EF4444'
+        'Cok Iyi': '#10B981', 'Iyi': '#22C55E', 'Orta': '#EAB308',
+        'Zayif': '#F97316', 'Kotu': '#F97316', 'Cok Zayif': '#EF4444', 'Cok Kotu': '#EF4444',
+        // Orijinal labellar (tedbir amaçlı)
+        'Çok İyi': '#10B981', 'İyi': '#22C55E', 'Çok Zayıf': '#EF4444'
     };
 
     chartInstances['derece'] = new Chart(ctx, {
