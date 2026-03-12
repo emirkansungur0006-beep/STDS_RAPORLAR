@@ -384,10 +384,9 @@ def normalize_name(name):
     """Kusursuz Normalizasyon: Türkçe karakterleri ASCII karşılıklarına indirger (Görsel eşleşmesi için)"""
     if not name: return ""
     import unicodedata
-    s_nfd = unicodedata.normalize('NFD', str(name))
-    s_clean = "".join(c for c in s_nfd if unicodedata.category(c) != 'Mn')
-    s_clean = re.sub(r'[.]', '', s_clean)
-    return " ".join(s_clean.strip().upper().split())
+    """Sadece karşılaştırma için: harf büyütür, boşluk temizler (Türkçe karakter uyumlu)"""
+    if not name: return ""
+    return " ".join(turkish_upper(str(name).strip()).split())
 
 def map_normalize(name):
     """Harita için sadece Türkçe BÜYÜK harf yapar (İşaretleri silmez)"""
@@ -529,11 +528,14 @@ def delete_gorsel():
 
 @app.route('/gorsel/<path:filename>')
 def serve_gorsel(filename):
-    """Görseli Supabase Storage'dan yönlendir (Normalize ederek)"""
+    """Görseli Supabase Storage'dan yönlendir (Normalize ve URL Encode ederek)"""
     from config import SUPABASE_URL, BUCKET_GORSELLER
+    import urllib.parse
     norm_filename = normalize_storage_path(filename)
+    # URL'deki boşluk ve özel karakterleri encode et
+    encoded_filename = urllib.parse.quote(norm_filename)
     # Supabase public URL yapısı
-    supabase_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_GORSELLER}/{norm_filename}"
+    supabase_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_GORSELLER}/{encoded_filename}"
     return redirect(supabase_url)
 
 
@@ -821,15 +823,20 @@ def komite_preview(id):
     from config import SUPABASE_URL, SUPABASE_KEY, BUCKET_RAPORLAR
     import requests
     import io
+    import urllib.parse
 
-    # Supabase Storage'dan dosyayı indir (Normalize ederek)
+    # Supabase Storage'dan dosyayı indir (Normalize ve URL Encode ederek)
     norm_dosya_adi = normalize_storage_path(dosya_adi)
-    supabase_url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_RAPORLAR}/{norm_dosya_adi}"
-    headers = {"Authorization": f"Bearer {SUPABASE_KEY}"}
+    encoded_dosya_adi = urllib.parse.quote(norm_dosya_adi)
+    supabase_url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_RAPORLAR}/{encoded_dosya_adi}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY
+    }
     response = requests.get(supabase_url, headers=headers)
 
     if response.status_code != 200:
-        return f"Dosya bulutta bulunamadı: {dosya_adi} (Hata: {response.status_code})", 404
+        return f"Dosya bulutta bulunamadı: {dosya_adi} (Status: {response.status_code})", 404
 
     file_data = io.BytesIO(response.content)
     ext = os.path.splitext(dosya_adi)[1].lower()
