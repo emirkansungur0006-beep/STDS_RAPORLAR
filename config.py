@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-STDS Raporlar - Veritabanı Yapılandırma
-"""
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Veritabanı Yapılandırması
 DB_URL_ENV = os.environ.get('DATABASE_URL')
@@ -31,4 +30,10 @@ GÖZLEM_GÖRSELLER_DIR = os.path.join(GOZLEM_DIR, 'İL GÖRSELLERİ')
 
 # Uygulama Güvenliği
 SECRET_KEY = os.environ.get('SECRET_KEY', 'stds-saglik-bakanligi-secure-key-2024')
+
+# Supabase Storage Ayarları
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://casbkhujugmibpybhmvm.supabase.co')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'sb_secret_kkqvW8fy_qwGEeTSUjPVeA_9V1KxGh3')
+BUCKET_RAPORLAR = 'stds_raporlar'
+BUCKET_GORSELLER = 'stds_gorseller'
 

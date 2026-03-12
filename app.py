@@ -16,46 +16,35 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
 from functools import wraps
 from config import DB_CONFIG
-from whitenoise import WhiteNoise
-
 app = Flask(__name__, template_folder='templates', static_folder='static')
-app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/', prefix='static/')
-app.secret_key = os.environ.get('SECRET_KEY', 'stds-secret-key-12345')
+# app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/', prefix='static/')
+app.secret_key = os.environ.get('SECRET_KEY', 'stds-saglik-bakanligi-secure-key-2024')
 CORS(app)
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
 import sqlite3
 
-def get_db():
-    """Veritabanı bağlantısı al (SQLite, Bulut veya Yerel PostgreSQL)"""
-    from config import USE_SQLITE, SQLITE_DB_PATH
-    
-    if USE_SQLITE:
-        conn = sqlite3.connect(SQLITE_DB_PATH)
-        # SQLite'da satırlara isimle erişmek için
-        conn.row_factory = sqlite3.Row
-        return conn
+import traceback
 
-    # Bulut ortamı (Supabase) için bağlantı dizesi veya tekil parametreler
-    db_url = os.environ.get('DATABASE_URL')
-    if db_url:
-        conn = psycopg2.connect(db_url)
-    else:
-        # Yerel ortam için config.py kullan
-        conn = psycopg2.connect(**DB_CONFIG)
-    
+def get_db():
+    """Veritabanı bağlantısı al (Verified host for Vercel)"""
+    db_url = "postgresql://postgres.casbkhujugmibpybhmvm:LLpp1594369*@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+    conn = psycopg2.connect(db_url)
     conn.set_client_encoding('UTF8')
     return conn
 
 def get_placeholder():
-    """DB türüne göre placeholder döner"""
-    from config import USE_SQLITE
-    return '?' if USE_SQLITE else '%s'
+    """DB türüne göre placeholder döner (PostgreSQL)"""
+    return '%s'
 
 def get_like_op():
-    """DB türüne göre case-insensitive LIKE operatörü döner"""
-    from config import USE_SQLITE
-    return 'LIKE' if USE_SQLITE else 'ILIKE'
+    """DB türüne göre case-insensitive LIKE operatörü döner (PostgreSQL)"""
+    return 'ILIKE'
 
 
 def serialize_row(row, columns):
@@ -108,7 +97,6 @@ def admin_required(f):
 # ============================================
 # AUTHENTICATION
 # ============================================
-
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
@@ -118,29 +106,32 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Kullanıcı adı ve şifre gereklidir'}), 400
     
-    conn = get_db()
-    cur = conn.cursor()
-    placeholder = get_placeholder()
-    cur.execute(f"SELECT id, username, password_hash, role FROM users WHERE username = {placeholder}", (username,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-    
-    if user and check_password_hash(user[2], password):
-        session.clear()
-        session['user_id'] = user[0]
-        session['username'] = user[1]
-        session['role'] = user[3]
-        return jsonify({
-            'success': True,
-            'user': {
-                'username': user[1],
-                'role': user[3]
-            }
-        })
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        placeholder = get_placeholder()
+        cur.execute(f"SELECT id, username, password_hash, role FROM users WHERE username = {placeholder}", (username,))
+        user = cur.fetchone()
+        
+        if user and check_password_hash(user[2], password):
+            session.clear()
+            session['user_id'] = user[0]
+            session['username'] = user[1]
+            session['role'] = user[3]
+            return jsonify({
+                'success': True,
+                'user': {
+                    'username': user[1],
+                    'role': user[3]
+                }
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cur' in locals(): cur.close()
+        if 'conn' in locals(): conn.close()
     
     return jsonify({'error': 'Geçersiz kullanıcı adı veya şifre'}), 401
-
 @app.route('/api/auth/logout')
 def logout():
     session.clear()
@@ -403,6 +394,14 @@ def map_normalize(name):
     if not name: return ""
     return " ".join(turkish_upper(str(name).strip()).split())
 
+def normalize_storage_path(path):
+    """Bulut depolama için yolu normalize et (ASCII only)"""
+    if not path: return ""
+    trans = str.maketrans("çğışüöÇĞİŞÜÖı", "cgisuoCGISUOi")
+    path = str(path).translate(trans)
+    path = "".join(c for c in path if ord(c) < 128)
+    return path.replace("\\", "/")
+
 @app.route('/api/gorseller/mevcut')
 def get_gorseli_olan_hastaneler():
     """Görsele sahip olan tüm hastanelerin normalleştirilmiş isimlerini döner"""
@@ -530,8 +529,12 @@ def delete_gorsel():
 
 @app.route('/gorsel/<path:filename>')
 def serve_gorsel(filename):
-    """Yerel bilgisayardaki PNG dosyasını tarayıcıya sun"""
-    return send_from_directory(GORSELLER_BASE_DIR, filename)
+    """Görseli Supabase Storage'dan yönlendir (Normalize ederek)"""
+    from config import SUPABASE_URL, BUCKET_GORSELLER
+    norm_filename = normalize_storage_path(filename)
+    # Supabase public URL yapısı
+    supabase_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_GORSELLER}/{norm_filename}"
+    return redirect(supabase_url)
 
 
 # ============================================
@@ -800,7 +803,7 @@ def komite_standartlar(id):
 @app.route('/api/komite/preview/<int:id>')
 @login_required
 def komite_preview(id):
-    """Komite Raporu kaynak dosyasını önizlemek için döner."""
+    """Komite Raporu kaynak dosyasını Supabase Storage'dan indirip sunar."""
     conn = get_db()
     cur = conn.cursor()
     placeholder = get_placeholder()
@@ -815,26 +818,32 @@ def komite_preview(id):
     il_adi = rapor[0]
     dosya_adi = rapor[1]
 
-    from config import KOMITE_DIR
-    import os
-    # Dosyalar doğrudan KOMITE_DIR içinde yer alıyor, il bazlı klasörlemeye gerek yok
-    file_path = os.path.join(KOMITE_DIR, dosya_adi)
+    from config import SUPABASE_URL, SUPABASE_KEY, BUCKET_RAPORLAR
+    import requests
+    import io
 
-    if not os.path.exists(file_path):
-        return f"Dosya bulunamadı: {dosya_adi}", 404
+    # Supabase Storage'dan dosyayı indir (Normalize ederek)
+    norm_dosya_adi = normalize_storage_path(dosya_adi)
+    supabase_url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_RAPORLAR}/{norm_dosya_adi}"
+    headers = {"Authorization": f"Bearer {SUPABASE_KEY}"}
+    response = requests.get(supabase_url, headers=headers)
 
-    ext = os.path.splitext(file_path)[1].lower()
+    if response.status_code != 200:
+        return f"Dosya bulutta bulunamadı: {dosya_adi} (Hata: {response.status_code})", 404
+
+    file_data = io.BytesIO(response.content)
+    ext = os.path.splitext(dosya_adi)[1].lower()
 
     if ext == '.pdf':
-        return send_from_directory(KOMITE_DIR, dosya_adi, mimetype='application/pdf')
+        from flask import send_file
+        return send_file(file_data, mimetype='application/pdf', as_attachment=False, download_name=dosya_adi)
     
     elif ext == '.docx':
         # Extract text/html using mammoth
         try:
             import mammoth
-            with open(file_path, "rb") as docx_file:
-                result = mammoth.convert_to_html(docx_file)
-                html = result.value
+            result = mammoth.convert_to_html(file_data)
+            html = result.value
             
             html_content = f"<div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto;'>"
             html_content += f"<h2 style='text-align:center; color:#0054A6; border-bottom:1px solid #ddd; padding-bottom:10px;'>{dosya_adi}</h2>"
@@ -858,7 +867,7 @@ def komite_preview(id):
         try:
             import pandas as pd
             # Use pandas to read all sheets
-            xls = pd.ExcelFile(file_path)
+            xls = pd.ExcelFile(file_data)
             html_content = f"<div style='font-family: Arial, sans-serif;'>"
             html_content += f"<h2 style='text-align:center; color:#0054A6;'>{dosya_adi}</h2>"
             for sheet_name in xls.sheet_names:
