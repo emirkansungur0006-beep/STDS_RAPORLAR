@@ -36,4 +36,3 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://casbkhujugmibpybhmvm.supa
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'sb_secret_kkqvW8fy_qwGEeTSUjPVeA_9V1KxGh3')
 BUCKET_RAPORLAR = 'stds_raporlar'
 BUCKET_GORSELLER = 'stds_gorseller'
-
