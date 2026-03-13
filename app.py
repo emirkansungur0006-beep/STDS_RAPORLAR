@@ -29,17 +29,36 @@ def handle_exception(e):
     import traceback
     return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
-def get_supabase_authenticated_url(bucket, filename):
-    """Supabase Storage authenticated URL'ini döner"""
+def get_supabase_url_base(bucket, filename):
+    """Normalize filename and return base storage URL for authenticated access"""
     if not filename: return None
-    
-    # Path normalization for Supabase (Forward slash, ASCII)
-    trans = str.maketrans("çğışüöÇĞİŞÜÖıİ", "cgisuoCGISUOiI")
-    norm_name = str(filename).translate(trans)
-    norm_name = "".join(c for c in norm_name if ord(c) < 128).replace("\\", "/")
-    
-    encoded_path = urllib.parse.quote(norm_name)
+    # Ensure forward slashes and no leading slash
+    path = str(filename).replace('\\', '/').strip('/')
+    # Encoded path (quote handles spaces as %20)
+    encoded_path = urllib.parse.quote(path)
     return f"{SUPABASE_URL}/storage/v1/object/authenticated/{bucket}/{encoded_path}"
+
+def get_supabase_signed_url(bucket, filename, expires_in=3600):
+    """Generates a signed URL for a file in Supabase Storage"""
+    if not filename: return None
+    path = str(filename).replace('\\', '/').strip('/')
+    encoded_path = urllib.parse.quote(path)
+    # API: POST /storage/v1/object/sign/[bucket]/[path]
+    url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{encoded_path}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY,
+        "Content-Type": "application/json"
+    }
+    try:
+        r = requests.post(url, headers=headers, json={"expiresIn": expires_in})
+        if r.status_code == 200:
+            data = r.json()
+            # Supabase returns /object/sign/..., we must prefix with SUPABASE_URL + /storage/v1
+            return f"{SUPABASE_URL}/storage/v1{data['signedURL']}"
+    except Exception as e:
+        print(f"DEBUG: Signed URL error: {e}")
+    return None
 
 import sqlite3
 import traceback
@@ -60,13 +79,18 @@ def normalize_storage_path(path):
     return path.strip('/')
 
 def normalize_name(name):
-    """Kusursuz Normalizasyon: Türkçe karakterleri ASCII karşılıklarına indirger"""
+    """Kusursuz Normalizasyon: Türkçe karakterleri ASCII karşılıklarına indirger ve temizler"""
     if not name: return ""
     import unicodedata
     import re
+    # NFD: Normalize characters (dotted I -> I + dot)
     s_nfd = unicodedata.normalize('NFD', str(name))
+    # Filter out non-spacing marks (dots, accents)
     s_clean = "".join(c for c in s_nfd if unicodedata.category(c) != 'Mn')
-    s_clean = re.sub(r'[.]', '', s_clean)
+    # Custom mapping for edge cases if any
+    # Replace common symbols
+    s_clean = re.sub(r'[.\-\(\)\_]', ' ', s_clean)
+    # Upper case and collapse spaces
     return " ".join(s_clean.strip().upper().split())
 
 def get_placeholder():
@@ -358,22 +382,24 @@ def get_hastane_gorselleri(hastane_adi):
 
 @app.route('/gorsel/<path:filename>')
 def serve_gorsel(filename):
-    """Yerel diskte yoksa Supabase'den çekip sun (Proxy)"""
+    """Yerel diskte yoksa Supabase'den çekip sun (Proxy with Signed URL redirection fallback)"""
     from config import GÖZLEM_GÖRSELLER_DIR
-    GORSELLER_BASE_DIR = GÖZLEM_GÖRSELLER_DIR
-    local_path = os.path.join(GORSELLER_BASE_DIR, filename)
+    local_path = os.path.join(GÖZLEM_GÖRSELLER_DIR, filename)
     if os.path.exists(local_path):
-        return send_from_directory(GORSELLER_BASE_DIR, filename)
+        return send_from_directory(GÖZLEM_GÖRSELLER_DIR, filename)
     
-    url = get_supabase_authenticated_url(BUCKET_GORSELLER, filename)
-    if url:
-        headers = {"Authorization": f"Bearer {SUPABASE_KEY}", "apikey": SUPABASE_KEY}
+    # Try fetching with Signed URL for better compatibility
+    signed_url = get_supabase_signed_url(BUCKET_GORSELLER, filename)
+    if signed_url:
         try:
-            r = requests.get(url, headers=headers)
+            r = requests.get(signed_url)
             if r.status_code == 200:
+                # Still proxying in backend to avoid CORS/broken iframe if images are embedded complexly
+                # But using a SIGNED URL from backend makes the request more reliable
                 return Response(r.content, mimetype=r.headers.get('Content-Type'))
         except Exception as e:
             print(f"DEBUG: Image proxy error: {e}")
+    
     return "Görsel bulunamadı", 404
 
 # ============================================
@@ -444,11 +470,14 @@ def komite_preview(id):
         return jsonify({"error": "Rapor veya dosya bulunamadı"}), 404
 
     dosya_adi = rapor[1]
-    url = get_supabase_authenticated_url(BUCKET_RAPORLAR, dosya_adi)
-    headers = {"Authorization": f"Bearer {SUPABASE_KEY}", "apikey": SUPABASE_KEY}
+    # Use Signed URL for more reliable access
+    signed_url = get_supabase_signed_url(BUCKET_RAPORLAR, dosya_adi)
     
     try:
-        response = requests.get(url, headers=headers)
+        if not signed_url:
+            raise Exception("Supabase Signed URL üretilemedi.")
+            
+        response = requests.get(signed_url)
         if response.status_code != 200:
             return f"Dosya bulutta bulunamadı: {dosya_adi} (Status: {response.status_code})", 404
             
