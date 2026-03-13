@@ -12,6 +12,7 @@ import psycopg2.extras
 import requests
 import urllib.parse
 import io
+import mimetypes
 from datetime import date, time, datetime
 from flask import Flask, render_template, jsonify, request, send_from_directory, session, redirect, url_for, Response, send_file
 from werkzeug.utils import secure_filename
@@ -39,11 +40,15 @@ def get_supabase_url_base(bucket, filename):
     return f"{SUPABASE_URL}/storage/v1/object/authenticated/{bucket}/{encoded_path}"
 
 def get_supabase_signed_url(bucket, filename, expires_in=3600):
-    """Generates a signed URL for a file in Supabase Storage"""
+    """Generates a signed URL for a file in Supabase Storage with absolute path handling"""
     if not filename: return None
+    # Ensure forward slashes and no leading slash
     path = str(filename).replace('\\', '/').strip('/')
+    
+    # Supabase expects the path to be exactly as it appears in the storage console
+    # If the path contains spaces, we MUST quote it, but only once properly.
     encoded_path = urllib.parse.quote(path)
-    # API: POST /storage/v1/object/sign/[bucket]/[path]
+    
     url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{encoded_path}"
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -51,13 +56,25 @@ def get_supabase_signed_url(bucket, filename, expires_in=3600):
         "Content-Type": "application/json"
     }
     try:
-        r = requests.post(url, headers=headers, json={"expiresIn": expires_in})
+        r = requests.post(url, headers=headers, json={"expiresIn": expires_in}, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            # Supabase returns /object/sign/..., we must prefix with SUPABASE_URL + /storage/v1
             return f"{SUPABASE_URL}/storage/v1{data['signedURL']}"
+        else:
+            print(f"DEBUG: Supabase Sign Error: {r.status_code} - {r.text} | Bucket: {bucket} Path: {path}")
+            # Fallback for common error: Missing folder prefix in DB
+            if '/' not in path and bucket == BUCKET_RAPORLAR:
+                # Try common prefixes
+                for prefix in ['KOMİTE KOMİSYON RAPORLARI', 'GÖZLEM FORMLARI']:
+                    new_path = f"{prefix}/{path}"
+                    new_encoded = urllib.parse.quote(new_path)
+                    new_url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{new_encoded}"
+                    r2 = requests.post(new_url, headers=headers, json={"expiresIn": expires_in}, timeout=5)
+                    if r2.status_code == 200:
+                        data2 = r2.json()
+                        return f"{SUPABASE_URL}/storage/v1{data2['signedURL']}"
     except Exception as e:
-        print(f"DEBUG: Signed URL error: {e}")
+        print(f"DEBUG: Signed URL Exception: {e}")
     return None
 
 import sqlite3
@@ -78,20 +95,22 @@ def normalize_storage_path(path):
         path = path.replace('//', '/')
     return path.strip('/')
 
+def slugify(text):
+    """Turkish-aware slugify: Converts to lower-case, handles Turkish chars, removes special chars, replaces spaces with hyphens"""
+    if not text: return ""
+    # Specifically handle Turkish upper/lower case
+    text = str(text).replace('İ', 'i').replace('I', 'i').replace('ı', 'i').lower()
+    # Normalize NFD to remove accents/marks
+    text = unicodedata.normalize('NFD', text)
+    text = "".join(c for c in text if unicodedata.category(c) != 'Mn')
+    # Remove non-alphanumeric except spaces
+    text = re.sub(r'[^a-z0-9\s]', '', text)
+    # Replace spaces with hyphens and collapse
+    return "-".join(text.split())
+
 def normalize_name(name):
-    """Kusursuz Normalizasyon: Türkçe karakterleri ASCII karşılıklarına indirger ve temizler"""
-    if not name: return ""
-    import unicodedata
-    import re
-    # NFD: Normalize characters (dotted I -> I + dot)
-    s_nfd = unicodedata.normalize('NFD', str(name))
-    # Filter out non-spacing marks (dots, accents)
-    s_clean = "".join(c for c in s_nfd if unicodedata.category(c) != 'Mn')
-    # Custom mapping for edge cases if any
-    # Replace common symbols
-    s_clean = re.sub(r'[.\-\(\)\_]', ' ', s_clean)
-    # Upper case and collapse spaces
-    return " ".join(s_clean.strip().upper().split())
+    """Kusursuz Normalizasyon (Slugify tabanlı eşleşme için)"""
+    return slugify(name)
 
 def get_placeholder():
     """DB türüne göre placeholder döner (PostgreSQL)"""
@@ -362,41 +381,67 @@ def get_gorseli_olan_hastaneler():
 def get_hastane_gorselleri(hastane_adi):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, il, hastane_adi, dosya_yolu FROM gozlem_gorselleri")
-    rows = cur.fetchall()
-    columns = [desc[0] for desc in cur.description]
-    all_rows = []
-    for r in rows:
-        row_dict = {}
-        for i, col in enumerate(columns):
-            row_dict[col] = r[i]
-        all_rows.append(row_dict)
-    norm_target = normalize_name(hastane_adi)
-    matches = []
-    for r in all_rows:
-        if normalize_name(r['hastane_adi']) == norm_target:
-            matches.append(r)
-    cur.close()
-    conn.close()
-    return jsonify(matches)
+    try:
+        cur.execute("SELECT id, il, hastane_adi, dosya_yolu FROM gozlem_gorselleri")
+        rows = cur.fetchall()
+        columns = [desc[0] for desc in cur.description]
+        all_rows = []
+        for r in rows:
+            row_dict = {}
+            for i, col in enumerate(columns):
+                row_dict[col] = r[i]
+            all_rows.append(row_dict)
+        
+        # Decoding and normalizing
+        decoded_name = urllib.parse.unquote(hastane_adi)
+        norm_target = normalize_name(decoded_name)
+        
+        matches = []
+        for r in all_rows:
+            db_norm = normalize_name(r['hastane_adi'])
+            if db_norm == norm_target:
+                matches.append(r)
+        
+        if not matches:
+            # Emergency log for empty results
+            print(f"DEBUG: No visuals found for hospital: '{decoded_name}' | Slug: '{norm_target}'")
+            # Sample DB slug for comparison
+            if all_rows:
+                print(f"DEBUG: Sample DB Name: '{all_rows[0]['hastane_adi']}' | Slug: '{normalize_name(all_rows[0]['hastane_adi'])}'")
+                
+        return jsonify(matches)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route('/gorsel/<path:filename>')
 def serve_gorsel(filename):
-    """Yerel diskte yoksa Supabase'den çekip sun (Proxy with Signed URL redirection fallback)"""
+    """Proxy image from Supabase with correct MIME and inline headers"""
     from config import GÖZLEM_GÖRSELLER_DIR
     local_path = os.path.join(GÖZLEM_GÖRSELLER_DIR, filename)
     if os.path.exists(local_path):
         return send_from_directory(GÖZLEM_GÖRSELLER_DIR, filename)
     
-    # Try fetching with Signed URL for better compatibility
     signed_url = get_supabase_signed_url(BUCKET_GORSELLER, filename)
     if signed_url:
         try:
-            r = requests.get(signed_url)
+            r = requests.get(signed_url, timeout=10)
             if r.status_code == 200:
-                # Still proxying in backend to avoid CORS/broken iframe if images are embedded complexly
-                # But using a SIGNED URL from backend makes the request more reliable
-                return Response(r.content, mimetype=r.headers.get('Content-Type'))
+                # Better MIME detection
+                content_type = mimetypes.guess_type(filename)[0] or r.headers.get('Content-Type')
+                if not content_type or 'octet-stream' in content_type:
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext == '.png': content_type = 'image/png'
+                    elif ext in ['.jpg', '.jpeg']: content_type = 'image/jpeg'
+                
+                resp = Response(r.content, mimetype=content_type)
+                # Slugified filename for the header to avoid encoding issues while keeping it recognisable
+                safe_name = f"{slugify(os.path.basename(filename))}{os.path.splitext(filename)[1]}"
+                resp.headers['Content-Disposition'] = f'inline; filename="{safe_name}"'
+                return resp
         except Exception as e:
             print(f"DEBUG: Image proxy error: {e}")
     
@@ -477,41 +522,64 @@ def komite_preview(id):
         if not signed_url:
             raise Exception("Supabase Signed URL üretilemedi.")
             
-        response = requests.get(signed_url)
+        response = requests.get(signed_url, timeout=10)
         if response.status_code != 200:
             return f"Dosya bulutta bulunamadı: {dosya_adi} (Status: {response.status_code})", 404
             
         file_data = io.BytesIO(response.content)
         ext = os.path.splitext(dosya_adi)[1].lower()
+        safe_name = f"{slugify(dosya_adi)}{ext}"
 
         if ext == '.pdf':
-            return send_file(file_data, mimetype='application/pdf', as_attachment=False, download_name=dosya_adi)
+            resp = send_file(file_data, mimetype='application/pdf')
+            resp.headers['Content-Disposition'] = f'inline; filename="{safe_name}"'
+            return resp
         
         elif ext == '.docx':
             import mammoth
-            result = mammoth.convert_to_html(file_data)
-            html = result.value
-            html_content = f"<div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto;'>"
-            html_content += f"<h2 style='text-align:center; color:#0054A6; border-bottom:1px solid #ddd; padding-bottom:10px;'>{dosya_adi}</h2>"
-            html_content += f"<div style='margin-top:20px;' class='docx-content'>{html}</div>"
-            html_content += "</div>"
-            style = "<style>.docx-content table { width:100%; border-collapse: collapse; margin-top:10px; margin-bottom:20px; font-size: 13px; } .docx-content th, .docx-content td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; } .docx-content th { background-color: #f8f9fa; font-weight: bold; } .docx-content p { margin: 0 0 10px 0; }</style>"
-            return style + html_content, 200, {'Content-Type': 'text/html; charset=utf-8'}
+            try:
+                result = mammoth.convert_to_html(file_data)
+                html = result.value
+                html_content = f"<div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto;'>"
+                html_content += f"<h2 style='text-align:center; color:#0054A6; border-bottom:1px solid #ddd; padding-bottom:10px;'>{dosya_adi}</h2>"
+                html_content += f"<div style='margin-top:20px;' class='docx-content'>{html}</div>"
+                html_content += "</div>"
+                style = "<style>.docx-content table { width:100%; border-collapse: collapse; margin-top:10px; margin-bottom:20px; font-size: 13px; } .docx-content th, .docx-content td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; } .docx-content th { background-color: #f8f9fa; font-weight: bold; } .docx-content p { margin: 0 0 10px 0; }</style>"
+                return style + html_content, 200, {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Content-Disposition': f'inline; filename="{safe_name}.html"'
+                }
+            except:
+                # Fallback to direct download if conversion fails (set MIME explicitly)
+                resp = send_file(io.BytesIO(response.content), 
+                                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+                resp.headers['Content-Disposition'] = f'inline; filename="{safe_name}"'
+                return resp
             
         elif ext in ['.xlsx', '.xls']:
             import pandas as pd
-            xls = pd.ExcelFile(file_data)
-            html_content = f"<div style='font-family: Arial, sans-serif;'><h2 style='text-align:center; color:#0054A6;'>{dosya_adi}</h2>"
-            for sheet_name in xls.sheet_names:
-                df = pd.read_excel(xls, sheet_name=sheet_name)
-                html_content += f"<h3 style='margin-top:20px; background:#f0f4f8; padding:10px;'>Sekme: {sheet_name}</h3>"
-                html_content += df.to_html(index=False, classes="data-table", justify="left")
-            html_content += "</div>"
-            style = "<style>.data-table { width:100%; border-collapse: collapse; margin-top:10px; font-size: 13px; } .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; text-align: left; } .data-table th { background-color: #f8f9fa; color: #333; font-weight: 600; }</style>"
-            return style + html_content, 200, {'Content-Type': 'text/html; charset=utf-8'}
+            try:
+                xls = pd.ExcelFile(file_data)
+                html_content = f"<div style='font-family: Arial, sans-serif;'><h2 style='text-align:center; color:#0054A6;'>{dosya_adi}</h2>"
+                for sheet_name in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name=sheet_name)
+                    html_content += f"<h3 style='margin-top:20px; background:#f0f4f8; padding:10px;'>Sekme: {sheet_name}</h3>"
+                    html_content += df.to_html(index=False, classes="data-table", justify="left")
+                html_content += "</div>"
+                style = "<style>.data-table { width:100%; border-collapse: collapse; margin-top:10px; font-size: 13px; } .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; text-align: left; } .data-table th { background-color: #f8f9fa; color: #333; font-weight: 600; }</style>"
+                return style + html_content, 200, {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Content-Disposition': f'inline; filename="{safe_name}.html"'
+                }
+            except:
+                mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if ext == '.xlsx' else 'application/vnd.ms-excel'
+                resp = send_file(io.BytesIO(response.content), mimetype=mime)
+                resp.headers['Content-Disposition'] = f'inline; filename="{safe_name}"'
+                return resp
             
     except Exception as e:
-        return f"<div style='color:red; text-align:center;'>Dosya işleme hatası: {str(e)}</div>", 500
+        import traceback
+        return f"<div style='color:red; text-align:center;'>Dosya işleme hatası: {str(e)}<pre>{traceback.format_exc()}</pre></div>", 500
     
     return f"<div style='color:red; text-align:center;'>Desteklenmeyen dosya formatı: {ext}</div>", 400
 
